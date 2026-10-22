@@ -4,43 +4,28 @@ using UnityEngine.InputSystem;
 
 public class ComboLogger : MonoBehaviour
 {
-    enum Request
-    {
-        None,
-        Basic,
-        Hold,
-        EX
-    }
-
-    enum Action
-    {
-        None,
-        BA1,
-        BA2,
-        BA3,
-        EX,
-        JumpAttack,
-        Hold
-    }
+    enum Request { None, Basic, EX, Hold }
 
     public enum HoldMode
     {
         DecideOnRelease, // tap = basic on release, hold = HOLD. Clean, but taps fire slightly later.
-        FireOnPress // basic fires instantly; keep holding to follow up with HOLD (BA1 -> HOLD).
+        FireOnPress      // basic fires instantly; keep holding to follow up with HOLD (BA1 -> HOLD).
     }
 
     [Header("Refs")]
     [SerializeField] PlayerController2D player;
+    [Tooltip("Layers your hitboxes can hit (e.g. Enemy). Must NOT include the player's own layer.")]
+    [SerializeField] LayerMask hitMask;
+
+    [Header("Attacks")]
+    [SerializeField] AttackData[] basics = new AttackData[3];
+    [SerializeField] AttackData exAttack;
+    [SerializeField] AttackData jumpAttack;
+    [SerializeField] AttackData holdAttack;
 
     [Header("Hold attack")]
     [SerializeField] HoldMode holdMode = HoldMode.DecideOnRelease;
     [SerializeField] float holdThreshold = 0.3f;
-
-    [Header("Action durations (s) - stand-ins for animation length")]
-    [SerializeField] float[] basicDurations = { 0.25f, 0.3f, 0.45f };
-    [SerializeField] float exDuration = 0.6f;
-    [SerializeField] float jumpAttackDuration = 0.35f;
-    [SerializeField] float holdDuration = 0.6f;
 
     [Header("Combo feel (s)")]
     [Tooltip("After an action ends, how long the chain stays alive before resetting to BA1.")]
@@ -52,44 +37,53 @@ public class ComboLogger : MonoBehaviour
     [Header("Energy")]
     [SerializeField] float maxEnergy = 100f;
     [SerializeField] float exCost = 50f;
-    [SerializeField] float energy = 100f;
-    [Tooltip("Fake gain per basic until real hits exist.")]
-    [SerializeField] float debugEnergyPerBasic = 10f;
+    [SerializeField] float energy = 50f;
 
-    // runtime state
-    Action current = Action.None;
-    float actionEndTime;
+    // current action
+    AttackData current;
+    float actionStart;
+    bool hitWindowChecked;
+    readonly HashSet<IDamageable> hitThisAction = new();
+    readonly List<Collider2D> overlapResults = new();
+    ContactFilter2D filter;
+
+    // chain
     float chainExpireTime;
-    int nextBasic; // 0 = BA1, 1 = BA2, 2 = BA3
+    int nextBasic;
     bool airAttackUsed;
-
-    Request buffered = Request.None;
-    float bufferedAt;
-
-    float pressStart;
-    bool pressHandled; // basic already resolved for this press
-    bool holdConsumed; // hold already fired (or not allowed) for this press
-
     readonly List<string> chain = new();
     string lastMessage = "";
 
-    bool Acting => current != Action.None;
-    bool Grounded => player == null || player.IsGrounded;
+    // input
+    Request buffered = Request.None;
+    float bufferedAt;
+    float pressStart;
+    bool pressHandled;
+    bool holdConsumed;
 
-    // Update is called once per frame
+    bool Acting => current != null;
+    bool Grounded => player == null || player.IsGrounded;
+    int Facing => player != null ? player.Facing : 1;
+
+    void Awake()
+    {
+        filter = new ContactFilter2D { useTriggers = true };
+        filter.SetLayerMask(hitMask);
+    }
+
     void Update()
     {
         float now = Time.time;
         if (Grounded) airAttackUsed = false;
 
-        // Finish current action if its duration has passed
-        if (Acting && now >= actionEndTime)
+        // Finish the current action
+        if (Acting && now - actionStart >= current.Duration)
         {
-            current = Action.None;
+            current = null;
             chainExpireTime = now + comboWindow;
         }
 
-        // Run a buffered input if it is still fresh
+        // Run a buffered input if it's still fresh
         if (!Acting && buffered != Request.None)
         {
             var r = buffered;
@@ -97,10 +91,15 @@ public class ComboLogger : MonoBehaviour
             if (now - bufferedAt <= bufferWindow) Execute(r);
         }
 
-        // Read new input from the mouse and keyboard
+        // Read new input
         ReadInput(now);
 
-        // Chain timeout : if the player is not acting and the chain has expired, reset to BA1
+        // Hitbox
+        if (Acting) UpdateHitWindow(now);
+
+        if (player != null) player.Locked = Acting;
+
+        // Chain timeout
         if (!Acting && chain.Count > 0 && now > chainExpireTime)
         {
             Debug.Log($"<b>Chain ended:</b> {string.Join(" -> ", chain)}");
@@ -109,10 +108,13 @@ public class ComboLogger : MonoBehaviour
         }
     }
 
+    //---------------------------------------------
+    // Input handling
+
     /// <summary>
-    /// Reads input from the mouse and keyboard, and submits requests to perform actions based on the current state and timing.
+    /// Reads mouse and keyboard input and submits requests to the combo system.
     /// </summary>
-    /// <param name="now"> The current time </param>
+    /// <param name="now"> Current time in seconds (Time.time).</param>
     void ReadInput(float now)
     {
         var mouse = Mouse.current;
@@ -125,7 +127,7 @@ public class ComboLogger : MonoBehaviour
         {
             pressStart = now;
             pressHandled = false;
-            holdConsumed = !Grounded; // can't hold in air
+            holdConsumed = !Grounded; // no hold attack in the air
 
             if (!Grounded || holdMode == HoldMode.FireOnPress)
             {
@@ -157,19 +159,16 @@ public class ComboLogger : MonoBehaviour
     }
 
     /// <summary>
-    /// Submits a request to perform an action. 
-    /// If the player is currently acting, the request may be buffered for later execution.
+    /// Submits a request to the combo system. 
+    /// If the player is currently acting, the request is buffered for later execution.
     /// </summary>
-    /// <param name="r"> The requested action </param>
-    /// <param name="now"> The current time </param>
+    /// <param name="r"> The request to submit (Basic, Ex, or Hold).</param>
+    /// <param name="now"> Current time in seconds (Time.time).</param>
     void Submit(Request r, float now)
     {
-        if (!Acting) { 
-            Execute(r); 
-            return; 
-        }
+        if (!Acting) { Execute(r); return; }
 
-        if (r == Request.EX && exCancelsActions && current != Action.EX && energy >= exCost)
+        if (r == Request.EX && exCancelsActions && current != exAttack && energy >= exCost)
         {
             Execute(r); // EX interrupts whatever is playing
             return;
@@ -180,13 +179,12 @@ public class ComboLogger : MonoBehaviour
     }
 
     /// <summary>
-    /// Executes a request immediately, assuming the player is not currently acting. 
-    /// Updates the current action and schedules its end.
+    /// Executes a request immediately, starting the corresponding attack and updating the combo chain.
     /// </summary>
-    /// <param name="r"> The requested action </param>
+    /// <param name="r"> The request to execute (Basic, Ex, or Hold).</param>
     void Execute(Request r)
     {
-        switch(r)
+        switch (r)
         {
             case Request.EX:
                 if (energy < exCost)
@@ -196,13 +194,13 @@ public class ComboLogger : MonoBehaviour
                     return;
                 }
                 energy -= exCost;
-                nextBasic = 0; // EX resets the basic string: BA1 -> EX -> BA1
-                Begin(Action.EX, exDuration);
+                nextBasic = 0; // EX resets the string: BA1 -> EX -> BA1
+                Begin(exAttack);
                 break;
-            
+
             case Request.Hold:
                 nextBasic = 0;
-                Begin(Action.Hold, holdDuration);
+                Begin(holdAttack);
                 break;
 
             case Request.Basic:
@@ -210,40 +208,125 @@ public class ComboLogger : MonoBehaviour
                 {
                     if (airAttackUsed) return; // one jump attack per airtime
                     airAttackUsed = true;
-                    Begin(Action.JumpAttack, jumpAttackDuration);
+                    Begin(jumpAttack);
                     break;
                 }
-                var a = (Action)((int)Action.BA1 + nextBasic);
-                Begin(a, basicDurations[nextBasic]);
-                nextBasic = (nextBasic + 1) % 3;
-                energy = Mathf.Min(maxEnergy, energy + debugEnergyPerBasic);
+                Begin(basics[nextBasic]);
+                nextBasic = (nextBasic + 1) % basics.Length;
                 break;
-
         }
     }
 
     /// <summary>
-    /// Begins an action, setting the current state and scheduling its end.
+    /// Begins an attack, setting the current action, starting the timer, and logging the combo chain.
     /// </summary>
-    /// <param name="a"> The action </param>
-    /// <param name="duration"> The duration of the action </param>
-    void Begin(Action a, float duration)
+    /// <param name="a"> The AttackData to begin.</param>
+    void Begin(AttackData a)
     {
+        if (a == null)
+        {
+            Debug.LogWarning("[ComboLogger] An AttackData slot is empty - assign it in the Inspector.");
+            return;
+        }
         current = a;
-        actionEndTime = Time.time + duration;
-        chain.Add(a == Action.JumpAttack ? "JUMP_ATK" : a.ToString().ToUpper());
+        actionStart = Time.time;
+        hitWindowChecked = false;
+        hitThisAction.Clear();
+
+        chain.Add(a.displayName);
         lastMessage = string.Join(" -> ", chain);
         Debug.Log(lastMessage);
     }
 
+    // --------------------------------
+    // Hitbox and damage
+
     /// <summary>
-    /// Quick on screen display of the current state for debugging.
+    /// Calculates the center of the hitbox for the given attack, taking into account the player's position and facing direction.
     /// </summary>
+    /// <param name="a"> The AttackData for which to calculate the hitbox center.</param>
+    /// <returns> The world position of the hitbox center as a Vector2.</returns>
+    Vector2 HitboxCenter(AttackData a) =>
+        (Vector2)transform.position + new Vector2(a.hitboxOffset.x * Facing, a.hitboxOffset.y);
+
+    /// <summary>
+    /// Checks if the current attack's hitbox is active and, if so, detects collisions with damageable targets. 
+    /// Applies damage, knockback, and hit stop to any targets hit, and updates the player's energy accordingly.
+    /// </summary>
+    /// <param name="now"> Current time in seconds (Time.time).</param>
+    void UpdateHitWindow(float now)
+    {
+        float t = now - actionStart;
+        if (t < current.startup) return;
+
+        bool inWindow = t < current.startup + current.active;
+        // If the active window is shorter than a frame, still check once.
+        if (!inWindow && hitWindowChecked) return;
+        hitWindowChecked = true;
+
+        overlapResults.Clear();
+        Physics2D.OverlapBox(HitboxCenter(current), current.hitboxSize, 0f, filter, overlapResults);
+
+        float stop = 0f;
+        foreach (var col in overlapResults)
+        {
+            var target = col.GetComponentInParent<IDamageable>();
+            if (target == null || !hitThisAction.Add(target)) continue; // each target once per attack
+
+            target.TakeHit(new HitInfo
+            {
+                damage = current.damage,
+                knockback = new Vector2(current.knockback.x * Facing, current.knockback.y),
+                attackName = current.displayName,
+                source = gameObject
+            });
+
+            energy = Mathf.Min(maxEnergy, energy + current.energyGain);
+            stop = current.hitstop;
+        }
+
+        if (stop > 0f) HitStop.Do(stop);
+    }
+
+    /// <summary>
+    /// Returns a string representing the current phase of the action: "startup", "ACTIVE", or "recovery".
+    /// </summary>
+    /// <returns> A string indicating the current phase of the action, or "-" if no action is active.</returns>
+    string Phase()
+    {
+        if (!Acting) return "-";
+        float t = Time.time - actionStart;
+        if (t < current.startup) return "startup";
+        if (t < current.startup + current.active) return "ACTIVE";
+        return "recovery";
+    }
+
+    // --------------------------------
+    // Debugging and visualization
+
+    void OnDrawGizmos()
+    {
+        if (!Application.isPlaying || current == null) return;
+        float t = Time.time - actionStart;
+        Gizmos.color = t < current.startup ? new Color(1f, 1f, 0f, 0.35f)
+                        : t < current.startup + current.active ? new Color(1f, 0f, 0f, 0.6f)
+                        : new Color(0.5f, 0.5f, 0.5f, 0.25f);
+        Gizmos.DrawCube(HitboxCenter(current), current.hitboxSize);
+    }
+
+    void OnDrawGizmosSelected()
+    {
+        // Preview BA1's hitbox in edit mode so you can size it without pressing Play
+        if (current != null || basics == null || basics.Length == 0 || basics[0] == null) return;
+        Gizmos.color = new Color(1f, 0f, 0f, 0.5f);
+        Gizmos.DrawWireCube(HitboxCenter(basics[0]), basics[0].hitboxSize);
+    }
+
     void OnGUI()
     {
         var style = new GUIStyle(GUI.skin.label) { fontSize = 22 };
         GUI.Label(new Rect(20, 20, 1200, 30), $"Chain: {string.Join(" -> ", chain)}", style);
-        GUI.Label(new Rect(20, 50, 1200, 30), $"Doing: {current}   Grounded: {Grounded}", style);
+        GUI.Label(new Rect(20, 50, 1200, 30), $"Doing: {(Acting ? current.displayName : "-")} [{Phase()}]   Grounded: {Grounded}", style);
         GUI.Label(new Rect(20, 80, 1200, 30), $"Energy: {energy:0}/{maxEnergy:0}   Hold mode: {holdMode}", style);
         GUI.Label(new Rect(20, 110, 1200, 30), lastMessage, style);
     }

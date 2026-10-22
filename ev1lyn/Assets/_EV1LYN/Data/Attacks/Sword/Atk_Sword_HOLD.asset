@@ -1,0 +1,24 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: b59b7c11d9c22c643b83658ef8f6b57b, type: 3}
+  m_Name: Atk_Sword_HOLD
+  m_EditorClassIdentifier: Assembly-CSharp::AttackData
+  displayName: HOLD
+  startup: 0.12
+  active: 0.12
+  recovery: 0.3
+  damage: 25
+  energyGain: 8
+  hitstop: 0.1
+  knockback: {x: 7, y: 4}
+  hitboxOffset: {x: 1, y: 0}
+  hitboxSize: {x: 2, y: 1.2}
