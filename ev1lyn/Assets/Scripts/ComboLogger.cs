@@ -246,6 +246,10 @@ public class ComboLogger : MonoBehaviour
         Debug.Log(lastMessage);
     }
 
+    /// <summary>
+    /// Called when the player dashes. 
+    /// Adds "DASH" to the combo chain, cancels any current attack, and resets the buffered input.
+    /// </summary>
     void OnDashed()
     {
         chain.Add("DASH");
