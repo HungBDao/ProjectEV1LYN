@@ -64,6 +64,14 @@ public class ComboLogger : MonoBehaviour
     bool Acting => current != null;
     bool Grounded => player == null || player.IsGrounded;
     int Facing => player != null ? player.Facing : 1;
+    void OnEnable() 
+    { 
+        if (player != null) player.Dashed += OnDashed; 
+    }
+    void OnDisable() 
+    { 
+        if (player != null) player.Dashed -= OnDashed; 
+    }
 
     void Awake()
     {
@@ -236,6 +244,17 @@ public class ComboLogger : MonoBehaviour
         chain.Add(a.displayName);
         lastMessage = string.Join(" -> ", chain);
         Debug.Log(lastMessage);
+    }
+
+    void OnDashed()
+    {
+        chain.Add("DASH");
+        lastMessage = string.Join(" -> ", chain);
+        Debug.Log(lastMessage);
+
+        current = null; // cancel the attack mid-swing
+        buffered = Request.None; // throw away queued presses
+        chainExpireTime = Time.time + comboWindow;
     }
 
     // --------------------------------

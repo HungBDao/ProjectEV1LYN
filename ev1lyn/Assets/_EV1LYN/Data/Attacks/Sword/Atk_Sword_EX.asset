@@ -19,6 +19,6 @@ MonoBehaviour:
   damage: 40
   energyGain: 0
   hitstop: 0.12
-  knockback: {x: 8, y: 5}
+  knockback: {x: 8, y: 13}
   hitboxOffset: {x: 1.2, y: 0.2}
   hitboxSize: {x: 2.6, y: 1.6}
