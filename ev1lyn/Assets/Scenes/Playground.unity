@@ -584,6 +584,7 @@ GameObject:
   - component: {fileID: 1244030769}
   - component: {fileID: 1244030767}
   - component: {fileID: 1244030768}
+  - component: {fileID: 1244030770}
   m_Layer: 7
   m_Name: Player
   m_TagString: Untagged
@@ -779,6 +780,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: fc5ab7c07544d5b4fa5bf7f80e99ad3c, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::ComboLogger
+  health: {fileID: 1244030769}
   player: {fileID: 1244030767}
   hitMask:
     serializedVersion: 2
@@ -798,7 +800,8 @@ MonoBehaviour:
   maxEnergy: 100
   exCost: 50
   energy: 100
-  health: {fileID: 1244030769}
+  dodgeCounter: {fileID: 0}
+  counterWindow: 0.6
 --- !u!114 &1244030769
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -818,6 +821,24 @@ MonoBehaviour:
   sprite: {fileID: 0}
   hurtColor: {r: 1, g: 0.2, b: 0.2, a: 1}
   flashTime: 0.15
+--- !u!114 &1244030770
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1244030762}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 4173b6dfd8ba40a47861fb10087048a4, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::DodgeRewards
+  combo: {fileID: 1244030768}
+  slowMo: 1
+  slowScale: 0.25
+  slowDuration: 0.5
+  energyRefund: 15
+  rewardCooldown: 1
 --- !u!1 &1517392175
 GameObject:
   m_ObjectHideFlags: 0

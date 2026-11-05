@@ -12,6 +12,8 @@ public class ComboLogger : MonoBehaviour
         FireOnPress      // basic fires instantly; keep holding to follow up with HOLD (BA1 -> HOLD).
     }
 
+    [SerializeField] PlayerHealth health;
+
     [Header("Refs")]
     [SerializeField] PlayerController2D player;
     [Tooltip("Layers your hitboxes can hit (e.g. Enemy). Must NOT include the player's own layer.")]
@@ -39,7 +41,10 @@ public class ComboLogger : MonoBehaviour
     [SerializeField] float exCost = 50f;
     [SerializeField] float energy = 50f;
 
-    [SerializeField] PlayerHealth health;
+    [Header("Dodge counter")]
+    [SerializeField] AttackData dodgeCounter;
+    [Tooltip("Seconds after a dodge where attacking gives the counter. Game time, so slow-mo stretches it.")]
+    [SerializeField] float counterWindow = 0.6f;
 
     // current action
     AttackData current;
@@ -63,15 +68,20 @@ public class ComboLogger : MonoBehaviour
     bool pressHandled;
     bool holdConsumed;
 
+    float counterReadyUntil = -99f;
+
     bool Acting => current != null;
     bool Grounded => player == null || player.IsGrounded;
     int Facing => player != null ? player.Facing : 1;
+    bool CounterReady => Time.time < counterReadyUntil;
+
     void OnEnable() 
     {
         if (player != null)
         {
             player.Dashed += OnDashed;
             health.Hurt += OnHurt;
+            health.Dodged += OnDodged;
         }
     }
     void OnDisable() 
@@ -80,6 +90,7 @@ public class ComboLogger : MonoBehaviour
         {
             player.Dashed -= OnDashed;
             health.Hurt -= OnHurt;
+            health.Dodged -= OnDodged;
         }
     }
 
@@ -223,6 +234,13 @@ public class ComboLogger : MonoBehaviour
                 break;
 
             case Request.Basic:
+                if (CounterReady && dodgeCounter != null)
+                {
+                    counterReadyUntil = -99f; // use it up
+                    nextBasic = 0;
+                    Begin(dodgeCounter);
+                    break;
+                }
                 if (!Grounded)
                 {
                     if (airAttackUsed) return; // one jump attack per airtime
@@ -287,6 +305,12 @@ public class ComboLogger : MonoBehaviour
         chainExpireTime = Time.time + comboWindow;
     }
 
+    void OnDodged()
+    {
+        counterReadyUntil = Time.time + counterWindow;
+        lastMessage = "DODGE COUNTER READY";
+    }
+
     // --------------------------------
     // Hitbox and damage
 
@@ -349,6 +373,14 @@ public class ComboLogger : MonoBehaviour
         if (t < current.startup + current.active) return "ACTIVE";
         return "recovery";
     }
+
+    /// <summary>
+    /// Adds energy to the player's current energy, clamping it between 0 and maxEnergy.
+    /// </summary>
+    /// <param name="amount"> The amount of energy to add (can be negative to subtract energy).</param>
+    public void AddEnergy(float amount) => energy = Mathf.Clamp(energy + amount, 0f, maxEnergy);
+
+
 
     // --------------------------------
     // Debugging and visualization
