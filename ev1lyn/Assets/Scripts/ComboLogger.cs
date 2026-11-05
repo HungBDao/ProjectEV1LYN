@@ -39,6 +39,8 @@ public class ComboLogger : MonoBehaviour
     [SerializeField] float exCost = 50f;
     [SerializeField] float energy = 50f;
 
+    [SerializeField] PlayerHealth health;
+
     // current action
     AttackData current;
     float actionStart;
@@ -65,12 +67,20 @@ public class ComboLogger : MonoBehaviour
     bool Grounded => player == null || player.IsGrounded;
     int Facing => player != null ? player.Facing : 1;
     void OnEnable() 
-    { 
-        if (player != null) player.Dashed += OnDashed; 
+    {
+        if (player != null)
+        {
+            player.Dashed += OnDashed;
+            health.Hurt += OnHurt;
+        }
     }
     void OnDisable() 
     { 
-        if (player != null) player.Dashed -= OnDashed; 
+        if (player != null)
+        {
+            player.Dashed -= OnDashed;
+            health.Hurt -= OnHurt;
+        }
     }
 
     void Awake()
@@ -125,6 +135,7 @@ public class ComboLogger : MonoBehaviour
     /// <param name="now"> Current time in seconds (Time.time).</param>
     void ReadInput(float now)
     {
+        if (player != null && player.IsStunned) return;
         var mouse = Mouse.current;
         var kb = Keyboard.current;
         if (mouse == null || kb == null) return;
@@ -258,6 +269,21 @@ public class ComboLogger : MonoBehaviour
 
         current = null; // cancel the attack mid-swing
         buffered = Request.None; // throw away queued presses
+        chainExpireTime = Time.time + comboWindow;
+    }
+
+    /// <summary>
+    /// Called when the player is hurt.
+    /// </summary>
+    /// <param name="hit"> Information about the hit, including attack name, damage, and knockback.</param>
+    void OnHurt(HitInfo hit)
+    {
+        chain.Add($"HIT({hit.attackName})");
+        lastMessage = string.Join(" -> ", chain);
+        Debug.Log(lastMessage);
+        current = null; // cancel the attack mid-swing
+        buffered = Request.None; // throw away queued presses
+        nextBasic = 0; // reset the combo chain
         chainExpireTime = Time.time + comboWindow;
     }
 

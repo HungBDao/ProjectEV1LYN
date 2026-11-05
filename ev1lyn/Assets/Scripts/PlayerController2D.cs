@@ -1,7 +1,6 @@
 using System;
 using UnityEngine;
 using UnityEngine.InputSystem;
-using static TMPro.SpriteAssetUtilities.TexturePacker_JsonArray;
 
 /// <summary>
 /// 2D platformer movement controller. Handles running, jumping, double jumps, dashing, and coyote time.
@@ -55,6 +54,8 @@ public class PlayerController2D : MonoBehaviour
     public bool IsDashing => Time.time < dashEndTime;
     public bool IsInvulnerable => Time.time < iFrameEnd; // enemies will check this later
 
+    public bool IsStunned => Time.time < stunEndTime; // combat can use this to cancel attacks
+
     /// <summary>Fired the moment a dash starts. Combat listens to cancel the current attack.</summary>
     public event Action Dashed;
 
@@ -77,6 +78,7 @@ public class PlayerController2D : MonoBehaviour
     float iFrameEnd = -99f;
     int dashDir = 1;
 
+    float stunEndTime = -99f;
     void Awake() => rb = GetComponent<Rigidbody2D>();
 
     void Update()
@@ -90,7 +92,7 @@ public class PlayerController2D : MonoBehaviour
         if (kb.spaceKey.wasPressedThisFrame) lastJumpPressedTime = Time.time;
         if (kb.leftShiftKey.wasPressedThisFrame) TryDash();
 
-        if (!Locked && !IsDashing && moveInput != 0f) Facing = moveInput > 0f ? 1 : -1;
+        if (!Locked && !IsDashing && moveInput != 0f && !IsStunned) Facing = moveInput > 0f ? 1 : -1;
 
         if (visual != null)
         {
@@ -105,6 +107,7 @@ public class PlayerController2D : MonoBehaviour
     /// </summary>
     void TryDash()
     {
+        if (IsStunned) return;
         if (Time.time < nextDashTime) return;
         if (!IsGrounded)
         {
@@ -133,6 +136,15 @@ public class PlayerController2D : MonoBehaviour
             lastGroundedTime = now;
             airJumpsLeft = airJumps;
             airDashesLeft = airDashes;
+        }
+
+        // Stunned: decelerate to a stop and fall with gravity, but no input allowed
+        if (IsStunned)
+        {
+            float svx = Mathf.MoveTowards(rb.linearVelocity.x, 0f, groundDecel * 0.25f * dt);
+            rb.gravityScale = Gravity * fallGravityMultiplier / Mathf.Abs(Physics2D.gravity.y);
+            rb.linearVelocity = new Vector2(svx, Mathf.Max(rb.linearVelocity.y, -maxFallSpeed));
+            return; // no input while stunned
         }
 
         // Dashing overrides all other movement. It is not affected by gravity or friction.
@@ -196,6 +208,19 @@ public class PlayerController2D : MonoBehaviour
 
         vy = Mathf.Max(vy, -maxFallSpeed);
         rb.linearVelocity = new Vector2(vx, vy);
+    }
+
+    /// <summary>
+    /// Stuns the player for a duration and applies knockback.
+    /// </summary>
+    /// <param name="duration"> The duration of the stun.</param>
+    /// <param name="knockback"> The knockback velocity to apply.</param>
+    public void Stun(float duration, Vector2 knockback)
+    {
+        stunEndTime = Time.time + duration;
+        dashEndTime = -99f; // getting hit ends a dash
+        jumpCutAvailable = false;
+        rb.linearVelocity = knockback;
     }
 
     void OnDrawGizmosSelected()
